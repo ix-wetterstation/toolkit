@@ -1,0 +1,77 @@
+#!/bin/sh
+
+dec(){
+    for ARG in $*
+    do
+        echo -n $ARG | awk '{ printf "%02X ", $1}'
+    done
+}
+hex(){
+    for ARG in $*
+    do
+        echo -n "$ARG "
+    done
+}
+
+str(){
+    echo -n $(echo -n $1 | xxd -ps) | sed 's/[[:xdigit:]]\{2\}/ & /g'
+}
+
+temp() {
+    dec 07    # Number of bytes of AD
+    hex 16    # Flags AD type = SERVICE_DATA
+
+    hex 09    # service type temperatur
+    hex 18
+    hex 41    # 4 bytes float
+    hex 00
+    hex 00
+    hex 00
+}
+battery() {
+    dec 07    # Number of bytes of AD
+    hex 16    # Flags AD type = SERVICE_DATA
+
+    hex 0f    # service type battery
+    hex 18
+    hex 43    # 4 bytes float
+    hex 02
+    hex 03
+    hex 04
+}
+
+adv(){
+    payload="$@"
+
+    frame=$(echo $payload  | wc -w)
+    dec ${frame}
+    echo -n $payload ''
+
+    #fill the rest with 0. i dont know why
+    rest=$(expr 31 - ${frame} )
+    for i in $(seq ${rest})
+    do
+        hex 00
+    done
+    echo
+}
+
+name(){
+    dec 02    # Number of bytes that follow in first AD structure
+    dec 01    # Flags AD type
+    hex 1A    # Flags value 0x1A = 000011010
+
+    length=$(expr $(echo -n $1 | wc -m) + 1)
+
+    dec ${length}    # Number of bytes that follow in first AD structure
+    hex 09           # rD type
+
+    #name
+    str $1
+}
+
+
+hciconfig hci0 down
+hciconfig hci0 up
+hciconfig hci0 leadv
+hcitool -i hci0 cmd 0x08 0x0008 $(adv $(temp) $(battery) $(name yolo))

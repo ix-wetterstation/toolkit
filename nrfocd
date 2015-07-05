@@ -1,0 +1,94 @@
+#!/bin/sh
+THIS=$(dirname $(readlink -f $0))
+
+nrcd() {
+    openocd  -c "\
+        source [find interface/stlink-v2.cfg];
+        transport select hla_swd;
+        set speed 3000;
+        set WORKAREASIZE 0x0200;
+        source [find target/nrf51.cfg];
+        reset_config srst_only srst_nogate;
+        $@
+    "
+}
+
+command=$1
+shift
+
+case $command in
+
+    banks)
+        nrcd "\
+        init;
+        halt;
+        flash probe 0;
+        flash probe 1;
+        flash banks;
+        flash erase_check 0
+        reset run;
+        exit"
+        ;;
+
+    hex)
+        set -e
+        HEXFILE="$1"
+        tmp=/tmp/ocd_flash_XXXXXXXXX/
+        mkdir -p $tmp
+
+        #openocd doesn't handle hex correctly, so we give the thing each section and tell it where to put it
+        arm-none-eabi-objdump -Ihex -h "${HEXFILE}" | grep ".sec" | awk '{print $2}' | while read section
+        do
+            arm-none-eabi-objcopy -Iihex -Obinary --only-section $section "${HEXFILE}"  "${tmp}/bin${section}.bin"
+        done
+        FLASHSTUFF=$(arm-none-eabi-objdump -Ihex -h "${HEXFILE}" | grep ".sec" | awk '{print $2 ".bin 0x" $4}' | while read section
+        do
+            echo "flash write_image erase ${tmp}/bin$section"
+        done)
+
+        nrcd "\
+        init;
+        halt;
+        flash probe 0;
+        flash probe 1;
+        flash banks;
+        flash info 1;
+        ${FLASHSTUFF}
+        flash erase_check 1;
+        flash info 0;
+        flash info 1;
+        #flash erase_check 0
+        reset run;
+        exit"
+
+        rm -rf ${tmp}
+
+        ;;
+
+    recover)
+        nrcd "\
+        init;
+        halt;
+        flash probe 0;
+        flash probe 1;
+        flash banks;
+        flash info 1;
+        nrf51 mass_erase;
+        flash erase_sector 1 0 0
+        flash info 0;
+        flash info 1;
+        flash erase_check 1
+        flash erase_check 0
+        reset;
+        exit"
+        ;;
+
+
+
+    *)
+        echo "openocd flasher for the nrf51 sdk"
+        echo "commands:"
+        echo "  hex <file.hex>      flashes hex file"
+        echo "  recover             erase chip and reset factory lock"
+        exit 5
+esac
